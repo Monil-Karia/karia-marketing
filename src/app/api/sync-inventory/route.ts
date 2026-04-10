@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const CSV_PATH = path.join(process.cwd(), "inventory.csv");
 
