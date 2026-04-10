@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Noto+Serif:wght@600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+:root {
+  --navy:   #0f1f3d;
+  --navy2:  #1a2f52;
+  --saffron:#e8861a;
+  --saffron2:#f59d2e;
+  --cream:  #fdf8f2;
+  --card:   #ffffff;
+  --muted:  #6b7280;
+  --border: #e5e7eb;
+  --green:  #16a34a;
+  --red:    #dc2626;
+}
+
+* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+
+body {
+  font-family: 'Noto Sans', sans-serif;
+  background: var(--cream);
+  color: var(--navy);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar hide */
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Ripple button */
+.btn-primary {
+  background: var(--saffron);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 14px;
+  transition: background 0.18s, transform 0.12s;
+}
+.btn-primary:active { transform: scale(0.97); background: var(--saffron2); }
+
+.btn-navy {
+  background: var(--navy);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 14px;
+  transition: background 0.18s, transform 0.12s;
+}
+.btn-navy:active { transform: scale(0.97); background: var(--navy2); }
+
+/* Card */
+.card {
+  background: var(--card);
+  border-radius: 18px;
+  box-shadow: 0 1px 4px rgba(15,31,61,0.07), 0 0 0 1px rgba(15,31,61,0.05);
+}
+
+/* Fade-up animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.35s ease both; }
+
+/* Staggered children */
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.20s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger > *:nth-child(6) { animation-delay: 0.30s; }
+.stagger > *:nth-child(n+7) { animation-delay: 0.32s; }
+
+/* Pulse skeleton */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #ede8e0 25%, #f5f1eb 50%, #ede8e0 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 12px;
+}
