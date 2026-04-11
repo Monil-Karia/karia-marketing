@@ -7,56 +7,44 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-
+export async function GET() {
   const { data, error } = await supabase
     .from("products")
     .select("*")
-    .eq("id", id)
-    .single();
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
   return NextResponse.json(data);
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
     const { data, error } = await supabaseAdmin
       .from("products")
-      .update(body)
-      .eq("id", id)
+      .insert({
+        name: body.name,
+        price: body.price,
+        quantity: body.quantity,
+        is_returnable: body.is_returnable ?? false,
+        category: body.category ?? "Other",
+        image_url: body.image_url ?? null,
+        is_active: true,
+      })
       .select()
       .single();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json(data);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(data, { status: 201 });
   } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
-}
-
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-
-  const { error } = await supabaseAdmin
-    .from("products")
-    .update({ is_active: false })
-    .eq("id", id);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true });
 }

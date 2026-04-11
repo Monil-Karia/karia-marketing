@@ -5,6 +5,7 @@
 // ============================================================
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { CartItem } from "@/types";
 
 export async function GET(
   _req: NextRequest,
@@ -31,6 +32,40 @@ export async function PATCH(
   try {
     const body = await req.json();
 
+    // ── If cancelling → restore stock ─────────────────────────
+    if (body.status === "Cancelled") {
+      const { data: existingOrder, error: fetchError } = await supabaseAdmin
+        .from("orders")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (fetchError) {
+        return NextResponse.json({ error: fetchError.message }, { status: 404 });
+      }
+
+      if (existingOrder.status !== "Cancelled") {
+        const items: CartItem[] = existingOrder.items || [];
+
+        for (const item of items) {
+          const { data: product } = await supabaseAdmin
+            .from("products")
+            .select("quantity")
+            .eq("id", item.product.id)
+            .single();
+
+          if (product) {
+            const restoredQty = product.quantity + item.quantity;
+            await supabaseAdmin
+              .from("products")
+              .update({ quantity: restoredQty, is_active: true })
+              .eq("id", item.product.id);
+          }
+        }
+      }
+    }
+
+    // ── Apply allowed field updates ───────────────────────────
     const allowed = [
       "status",
       "delivery_date",
@@ -59,6 +94,10 @@ export async function PATCH(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Sync inventory CSV in background
+    fetch(`${req.nextUrl.origin}/api/sync-inventory`, { method: "POST" }).catch(() => {});
+
     return NextResponse.json(data);
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
