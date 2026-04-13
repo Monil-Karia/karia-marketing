@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
         const newQty = product.quantity - item.quantity;
         await supabaseAdmin
           .from("products")
-          .update({ quantity: newQty, is_active: newQty > 0 })
+          .update({ quantity: newQty, is_active:true})
           .eq("id", item.product.id);
       }
     }

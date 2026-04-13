@@ -46,6 +46,9 @@ export type Order = {
   return_requested: boolean;
   return_reason: string | null;
   created_at: string;
+  return_status: "accepted" | "rejected" | null;
+  payment_method: "online" | "cod";
+  payment_status: "pending" | "paid" | "failed";
 };
 
 export type DeliveryCheckResult = {

@@ -75,6 +75,7 @@ export async function PATCH(
       "payment_status",
       "razorpay_order_id",
       "razorpay_payment_id",
+      "return_status"
     ];
 
     const updatePayload: Record<string, unknown> = {};
