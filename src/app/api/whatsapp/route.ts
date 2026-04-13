@@ -8,11 +8,6 @@
 //  2. Go to Messaging → Try it out → Send a WhatsApp message
 //  3. Follow the sandbox instructions (send a join code once from your phone)
 //  4. Copy your Account SID and Auth Token from the Twilio dashboard
-//  5. Add to .env.local:
-//       TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxx
-//       TWILIO_AUTH_TOKEN=your_auth_token
-//       TWILIO_WHATSAPP_FROM=whatsapp:+14155238886   (Twilio sandbox number)
-//       ADMIN_WHATSAPP=whatsapp:+919876543210        (your WhatsApp number with country code)
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
