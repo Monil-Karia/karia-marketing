@@ -6,7 +6,7 @@ import config from "@/lib/config";
 
 type Props = {
   onAddressChange: (val: string) => void;
-  onResult: (result: DeliveryCheckResult) => void;
+  onResult:        (result: DeliveryCheckResult) => void;
 };
 
 declare global {
@@ -18,17 +18,25 @@ declare global {
 }
 
 export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
-  const [loading, setLoading]     = useState(false);
-  const [result, setResult]       = useState<DeliveryCheckResult | null>(null);
-  const [gpsError, setGpsError]   = useState("");
-  const [mapsReady, setMapsReady] = useState(false);
-  const containerRef              = useRef<HTMLDivElement>(null);
-  const inputRef                  = useRef<HTMLInputElement>(null);
+  const [loading, setLoading]       = useState(false);
+  const [result, setResult]         = useState<DeliveryCheckResult | null>(null);
+  const [gpsError, setGpsError]     = useState("");
+  const [mapsReady, setMapsReady]   = useState(false);
+  const [statusMsg, setStatusMsg]   = useState("");
 
-  // ── Load Google Maps script ───────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef     = useRef<HTMLInputElement>(null);
+
+  // Keep stable refs to callbacks so effect doesn't re-run
+  const onAddressChangeRef = useRef(onAddressChange);
+  const onResultRef        = useRef(onResult);
+  useEffect(() => { onAddressChangeRef.current = onAddressChange; }, [onAddressChange]);
+  useEffect(() => { onResultRef.current = onResult; }, [onResult]);
+
+  // ── Load Google Maps ──────────────────────────────────────────
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY;
-    if (!key) return; // No key → use plain fallback input
+    if (!key) return;
 
     if (window.google?.maps?.places) { setMapsReady(true); return; }
 
@@ -44,10 +52,11 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
     }
   }, []);
 
-  // ── Check delivery eligibility by coords ─────────────────────
+  // ── Call our delivery check API ───────────────────────────────
   const checkCoords = useCallback(async (lat: number, lng: number) => {
     setLoading(true);
     setGpsError("");
+    setStatusMsg("Checking if delivery is available…");
     try {
       const res  = await fetch("/api/delivery-check", {
         method:  "POST",
@@ -56,82 +65,100 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
       });
       const data: DeliveryCheckResult = await res.json();
       setResult(data);
-      onResult(data);
+      onResultRef.current(data);
+      setStatusMsg("");
     } catch {
-      setGpsError("Could not check delivery distance. Please try again.");
+      setGpsError("Could not check delivery. Please try again.");
+      setStatusMsg("");
     }
     setLoading(false);
-  }, [onResult]);
+  }, []); // stable — no deps needed since we use refs
 
   // ── Mount PlaceAutocompleteElement ────────────────────────────
   useEffect(() => {
     if (!mapsReady || !containerRef.current) return;
+
     containerRef.current.innerHTML = "";
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pac = new (window.google.maps.places as any).PlaceAutocompleteElement({
         componentRestrictions: { country: "in" },
-        locationBias: {
+        locationBias: new window.google.maps.Circle({
           center: { lat: config.shopLat, lng: config.shopLng },
           radius: 25000,
-        },
+        }),
       });
 
-      pac.style.width   = "100%";
-      pac.style.display = "block";
+      pac.style.cssText = "width:100%;display:block;";
       containerRef.current.appendChild(pac);
 
-      // ── This fires when user taps a suggestion ────────────────
+      // ── KEY FIX: gmp-placeselect fires when user picks a suggestion ──
       pac.addEventListener("gmp-placeselect", async (e: Event) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const place = (e as any).place;
 
-        // MUST await fetchFields before accessing location
-        await place.fetchFields({
-          fields: ["displayName", "formattedAddress", "location"],
-        });
+        setStatusMsg("Loading place details…");
+        setResult(null);
 
-        const addr = place.formattedAddress || place.displayName || "";
-        onAddressChange(addr);
+        try {
+          // Must await fetchFields FIRST before accessing any place data
+          await place.fetchFields({
+            fields: ["displayName", "formattedAddress", "location"],
+          });
 
-        // Now get the actual lat/lng and check distance
-        if (place.location) {
-          const lat = place.location.lat();
-          const lng = place.location.lng();
-          await checkCoords(lat, lng); // ← triggers real-time distance check
-        } else {
-          setGpsError("Could not get coordinates for this address. Please use GPS or try a different address.");
+          const addr = place.formattedAddress
+            || place.displayName
+            || "";
+
+          // Update parent with address
+          onAddressChangeRef.current(addr);
+
+          // Get coordinates and check delivery
+          if (place.location) {
+            const lat = place.location.lat();
+            const lng = place.location.lng();
+            await checkCoords(lat, lng);
+          } else {
+            setGpsError("Could not get coordinates for this address. Try a more specific address or use GPS.");
+            setStatusMsg("");
+          }
+        } catch (err) {
+          console.error("Place fetch error:", err);
+          setGpsError("Could not get details for this location. Please try again.");
+          setStatusMsg("");
         }
       });
-    } catch (err) {
-      console.warn("PlaceAutocompleteElement failed, using fallback input", err);
-      setMapsReady(false);
-    }
-  }, [mapsReady, checkCoords, onAddressChange]);
 
-  // ── GPS: use device location ──────────────────────────────────
+    } catch (err) {
+      console.warn("PlaceAutocompleteElement failed:", err);
+      setMapsReady(false); // fall back to plain input
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapsReady, checkCoords]); // checkCoords is stable
+
+  // ── GPS ───────────────────────────────────────────────────────
   async function useGPS() {
     if (!navigator.geolocation) {
-      setGpsError("Your browser does not support location. Please type your address.");
+      setGpsError("Your browser does not support GPS location.");
       return;
     }
-
-    // Check if we're on HTTP (GPS requires HTTPS or localhost)
     if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") {
-      setGpsError("GPS requires HTTPS. Please use the live site or type your address.");
+      setGpsError("GPS requires HTTPS. Please use the deployed site, or type your address.");
       return;
     }
 
     setLoading(true);
     setGpsError("");
     setResult(null);
+    setStatusMsg("Getting your GPS location…");
 
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
         const { latitude: lat, longitude: lng } = coords;
+        setStatusMsg("Location found! Checking delivery…");
 
-        // Reverse geocode to show address text
+        // Try to get a human-readable address
         if (window.google?.maps?.Geocoder) {
           try {
             const gc = new window.google.maps.Geocoder();
@@ -140,14 +167,12 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
               (results: { formatted_address: string }[], status: string) => {
                 if (status === "OK" && results[0]) {
                   const addr = results[0].formatted_address;
-                  onAddressChange(addr);
+                  onAddressChangeRef.current(addr);
                   if (inputRef.current) inputRef.current.value = addr;
                 }
               }
             );
-          } catch {
-            // Geocoding failed silently — we still have coords for distance check
-          }
+          } catch { /* silent */ }
         }
 
         await checkCoords(lat, lng);
@@ -155,12 +180,11 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
       },
       (err) => {
         setLoading(false);
+        setStatusMsg("");
         if (err.code === 1) {
-          setGpsError(
-            "Location access was denied. On iPhone: go to Settings → Safari → Location → Allow. Then reload this page."
-          );
+          setGpsError("Location permission denied. On iPhone: Settings → Safari → Location → Allow. Then reload.");
         } else if (err.code === 2) {
-          setGpsError("Location unavailable. Please type your address instead.");
+          setGpsError("Your location could not be determined. Please type your address.");
         } else {
           setGpsError("Location request timed out. Please type your address instead.");
         }
@@ -172,11 +196,11 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* GPS Button */}
+      {/* GPS button */}
       <button type="button" onClick={useGPS} disabled={loading}
         style={{
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          width: "100%",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 8, width: "100%",
           background: loading ? "#f7f3ee" : "var(--navy)",
           color: loading ? "var(--muted)" : "#fff",
           padding: "13px", borderRadius: 12, fontSize: 14, fontWeight: 600,
@@ -186,8 +210,8 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
       >
         {loading ? (
           <>
-            <span style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: loading ? "var(--navy)" : "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
-            Checking your location…
+            <span style={{ width: 16, height: 16, border: "2px solid #ddd", borderTopColor: "var(--navy)", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
+            {statusMsg || "Getting location…"}
           </>
         ) : (
           <>
@@ -207,37 +231,43 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
         <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
       </div>
 
-      {/* Google PlaceAutocompleteElement renders here */}
-      {mapsReady && <div ref={containerRef} style={{ width: "100%" }} />}
-
-      {/* Fallback plain input when Maps key not set */}
-      {!mapsReady && (
-        <input
-          ref={inputRef}
-          type="text"
-          onChange={(e) => onAddressChange(e.target.value)}
-          placeholder="e.g. Near Alibag Beach, Alibag, Maharashtra"
-          autoComplete="street-address"
-          style={{
-            width: "100%", background: "#f7f3ee",
-            border: "1px solid var(--border)", borderRadius: 12,
-            padding: "12px 14px", fontSize: 14, outline: "none",
-            color: "var(--navy)", fontFamily: "inherit", boxSizing: "border-box",
-          }}
-        />
+      {/* Google PlaceAutocompleteElement */}
+      {mapsReady && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div ref={containerRef} style={{ width: "100%" }} />
+          <p style={{ fontSize: 11, color: "var(--muted)" }}>
+            Select from the dropdown — delivery distance checks automatically
+          </p>
+        </div>
       )}
 
-      <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}>
-        {mapsReady
-          ? "Pick from suggestions — distance checks automatically"
-          : `Delivery within ${config.deliveryRadiusKm} km of our Alibag shop`}
-      </p>
+      {/* Fallback plain input */}
+      {!mapsReady && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <input
+            ref={inputRef}
+            type="text"
+            onChange={(e) => onAddressChangeRef.current(e.target.value)}
+            placeholder="e.g. Near Alibag Beach, Alibag, Maharashtra"
+            autoComplete="street-address"
+            style={{
+              width: "100%", background: "#f7f3ee",
+              border: "1px solid var(--border)", borderRadius: 12,
+              padding: "12px 14px", fontSize: 14, outline: "none",
+              color: "var(--navy)", fontFamily: "inherit", boxSizing: "border-box",
+            }}
+          />
+          <p style={{ fontSize: 11, color: "var(--muted)" }}>
+            Delivery available within {config.deliveryRadiusKm} km of our shop in Alibag
+          </p>
+        </div>
+      )}
 
-      {/* Loading indicator */}
-      {loading && (
+      {/* In-progress status */}
+      {statusMsg && !gpsError && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#f7f3ee", borderRadius: 10, padding: "10px 14px" }}>
           <span style={{ width: 14, height: 14, border: "2px solid var(--border)", borderTopColor: "var(--saffron)", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
-          <span style={{ fontSize: 13, color: "var(--muted)" }}>Checking if delivery is available to your location…</span>
+          <span style={{ fontSize: 13, color: "var(--muted)" }}>{statusMsg}</span>
         </div>
       )}
 
@@ -248,28 +278,29 @@ export default function DeliveryChecker({ onAddressChange, onResult }: Props) {
         </div>
       )}
 
-      {/* Result */}
+      {/* Delivery result */}
       {result && !loading && (
-        <div style={{ background: result.isEligible ? "#f0fdf4" : "#fef2f2", border: `1px solid ${result.isEligible ? "#bbf7d0" : "#fecaca"}`, borderRadius: 12, padding: "14px 16px" }}>
-          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: result.isEligible ? "var(--green)" : "var(--red)" }}>
+        <div style={{
+          background: result.isEligible ? "#f0fdf4" : "#fef2f2",
+          border: `1px solid ${result.isEligible ? "#bbf7d0" : "#fecaca"}`,
+          borderRadius: 12, padding: "14px 16px",
+        }}>
+          <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: result.isEligible ? "var(--green)" : "var(--red)" }}>
             {result.isEligible ? "✓ Delivery available!" : "✗ Outside delivery area"}
           </p>
           <p style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.5 }}>{result.message}</p>
           {result.isEligible && (
-            <div style={{ marginTop: 10, background: "rgba(22,163,74,0.08)", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ marginTop: 10, background: "rgba(22,163,74,0.08)", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontSize: 13, color: "var(--green)" }}>{result.distanceKm} km away</span>
-              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Delivery: ₹{result.deliveryCharge}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>
+                Delivery charge: ₹{result.deliveryCharge}
+              </span>
             </div>
           )}
         </div>
       )}
 
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .pac-container { border-radius: 12px !important; border: 1px solid #e5e7eb !important; box-shadow: 0 4px 20px rgba(15,31,61,0.1) !important; font-family: 'Noto Sans', sans-serif !important; z-index: 9999 !important; margin-top: 4px !important; }
-        .pac-item { padding: 10px 14px !important; font-size: 13px !important; cursor: pointer !important; }
-        .pac-item:hover { background: #f7f3ee !important; }
-      `}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
